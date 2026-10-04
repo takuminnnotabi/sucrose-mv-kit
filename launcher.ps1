@@ -51,7 +51,7 @@ $transcriptStarted = $false
 $logPath = $null
 try {
     $kitFiles = @('launcher.ps1', 'install.ps1', 'setup.py', 'refresh_playlists.py', 'wallpaper_control.py',
-                  'keep_quality_ready.py', 'quality_proxy.py', 'README.md', 'セットアップを開始.cmd')
+                  'keep_quality_ready.py', 'quality_proxy.py', 'desktop_next_bridge.py', 'README.md', '最初に読む.txt', 'セットアップを開始.cmd')
     foreach ($file in $kitFiles) {
         if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot $file))) {
             throw '必要なファイルが揃っていません。ZIP を右クリックして「すべて展開」し、展開したフォルダーの「セットアップを開始.cmd」を開いてください。'

@@ -1,5 +1,6 @@
 import http.server, urllib.request, urllib.error, json, os, sys, time, threading, subprocess, re
 from pathlib import Path
+# yt-dlp is installed in this kit's .venv; use its Python interpreter.
 import yt_dlp
 PORT=18743
 ROOT=Path(__file__).resolve().parent
@@ -26,6 +27,37 @@ class Quiet:
 cache={}
 locks={}
 state={'last':time.time(),'active':0}
+def extract(vid, format_id=None):
+    options={'format':format_id or 'bestvideo[protocol=https]/best[protocol=https]',
+             'format_sort':['res','fps','br'],'format_sort_force':True,
+             'quiet':True,'logger':Quiet(),'js_runtimes':{'node':{}},
+             'noplaylist':True,'socket_timeout':20,'retries':1,'cachedir':False}
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info=ydl.extract_info('https://www.youtube.com/watch?v='+vid,download=False)
+    if format_id and info.get('format_id') != format_id:
+        raise RuntimeError('The refreshed URL changed the video representation')
+    cache[vid]=(time.time(),info)
+    return info
+
+def open_range(vid,info,start,end):
+    """Renew an expired upstream URL once; retain the same video representation."""
+    for attempt in range(2):
+        request=urllib.request.Request(info['url'],headers={**info.get('http_headers',{}),
+                                       'Range':f'bytes={start}-{end}'})
+        try:
+            return urllib.request.urlopen(request,timeout=30),info
+        except urllib.error.HTTPError as error:
+            if error.code not in (403,410) or attempt:raise
+            with locks.setdefault(vid,threading.Lock()):
+                current=cache.get(vid)
+                if (current and current[1]['url']!=info['url']
+                        and current[1].get('format_id')==info.get('format_id')):
+                    info=current[1]
+                else:
+                    if not info.get('format_id'):
+                        raise
+                    cache.pop(vid,None)
+                    info=extract(vid,info.get('format_id'))
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def do_GET(self):
@@ -40,15 +72,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with lock:
                 cached=cache.get(vid)
                 if not cached or time.time()-cached[0]>7200:
-                    with yt_dlp.YoutubeDL({'format':'bestvideo[protocol=https]/best[protocol=https]','format_sort':['res','fps','br'],'format_sort_force':True,'quiet':True,'logger':Quiet(),'js_runtimes':{'node':{}},'noplaylist':True}) as ydl:
-                        info=ydl.extract_info('https://www.youtube.com/watch?v='+vid,download=False)
-                    cache[vid]=(time.time(),info)
+                    extract(vid)
                 info=cache[vid][1]
             total=info.get('filesize')
-            headers=info.get('http_headers',{}).copy()
-            if not total:
-                request=urllib.request.Request(info['url'],headers={**headers,'Range':'bytes=0-0'})
-                with urllib.request.urlopen(request,timeout=30) as response:total=int(response.headers['Content-Range'].split('/')[-1])
+            response,info=open_range(vid,info,0,0)
+            with response:
+                if response.headers.get('Content-Range'):
+                    total=int(response.headers['Content-Range'].split('/')[-1])
+                if not total:raise RuntimeError('Upstream did not report video length')
             rng=re.fullmatch(r'bytes=(\d+)-(\d*)',self.headers.get('Range',''))
             start=int(rng.group(1)) if rng else 0
             end=min(int(rng.group(2)),total-1) if rng and rng.group(2) else total-1
@@ -62,8 +93,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pos=start
             while pos<=end:
                 chunkend=min(pos+1024*1024*5-1,end)
-                request=urllib.request.Request(info['url'],headers={**headers,'Range':f'bytes={pos}-{chunkend}'})
-                with urllib.request.urlopen(request,timeout=40) as response:
+                response,info=open_range(vid,info,pos,chunkend)
+                with response:
                     remaining=chunkend-pos+1
                     while remaining:
                         data=response.read(min(65536,remaining))
