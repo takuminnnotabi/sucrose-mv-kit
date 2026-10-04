@@ -206,7 +206,7 @@ def register(sources, target=TARGET, source_file=SOURCES):
         raise RuntimeError('登録は保存しましたが Aerial を開けませんでした。アプリを手動で開いてください。') from error
     if result.returncode:
         raise RuntimeError('登録は保存しましたが Aerial を開けませんでした。アプリを手動で開いてください。')
-    print('Aerial を開きました。ネットワーク動画を有効にし、シャッフル再生を選んでください。')
+    print('Aerial を開きました。Live Feeds の Play を押し、Shuffle を選んでください。')
 
 
 def main(argv=None):
